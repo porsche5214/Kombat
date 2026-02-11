@@ -19,7 +19,7 @@ interface Character {
   strategy: string;
 }
 
-const CHARACTERS: Character[] = [
+const DEFAULT_CHARACTERS: Character[] = [
   { id: "warrior", name: "Warrior", emoji: "⚔️", hp: 120, atk: 15, def: 10, strategy: "// Attack nearest enemy\nif (enemy.distance < 2) {\n  attack(enemy);\n}" },
   { id: "mage", name: "Mage", emoji: "🔮", hp: 80, atk: 25, def: 5, strategy: "// Cast spell on weakest\nconst target = enemies.sortBy('hp')[0];\ncastSpell(target);" },
   { id: "tank", name: "Tank", emoji: "🛡️", hp: 200, atk: 8, def: 20, strategy: "// Defend allies\nif (ally.hp < 50) {\n  defend(ally);\n}" },
@@ -32,15 +32,26 @@ const SetupPhase = () => {
   const [searchParams] = useSearchParams();
   const mode = searchParams.get("mode") || "duel";
 
-  const [selectedId, setSelectedId] = useState<string>(CHARACTERS[0].id);
-  const [strategies, setStrategies] = useState<Record<string, string>>(
-    Object.fromEntries(CHARACTERS.map((c) => [c.id, c.strategy]))
+  const [selectedId, setSelectedId] = useState<string>(DEFAULT_CHARACTERS[0].id);
+  const [characters, setCharacters] = useState<Character[]>(
+    DEFAULT_CHARACTERS.map((c) => ({ ...c }))
   );
 
-  const selected = CHARACTERS.find((c) => c.id === selectedId) || CHARACTERS[0];
+  const selected = characters.find((c) => c.id === selectedId) || characters[0];
 
-  const handleStrategyChange = (value: string) => {
-    setStrategies((prev) => ({ ...prev, [selectedId]: value }));
+  const updateCharField = (field: keyof Character, value: string | number) => {
+    setCharacters((prev) =>
+      prev.map((c) => (c.id === selectedId ? { ...c, [field]: value } : c))
+    );
+  };
+
+  const handleStatChange = (field: "hp" | "atk" | "def", raw: string) => {
+    const num = parseInt(raw, 10);
+    if (!isNaN(num) && num >= 0) {
+      updateCharField(field, num);
+    } else if (raw === "") {
+      updateCharField(field, 0);
+    }
   };
 
   return (
@@ -82,7 +93,7 @@ const SetupPhase = () => {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-popover border-border">
-              {CHARACTERS.map((c) => (
+              {characters.map((c) => (
                 <SelectItem key={c.id} value={c.id} className="font-body">
                   <span className="flex items-center gap-2">
                     <span>{c.emoji}</span>
@@ -120,20 +131,29 @@ const SetupPhase = () => {
             </div>
           </div>
 
-          {/* Stats */}
+          {/* Editable Stats */}
           <div className="grid grid-cols-3 gap-3 mb-6">
-            <div className="bg-secondary rounded-lg p-3 text-center">
-              <p className="font-display text-xs tracking-wider text-destructive mb-1">HP</p>
-              <p className="font-display text-2xl font-bold">{selected.hp}</p>
-            </div>
-            <div className="bg-secondary rounded-lg p-3 text-center">
-              <p className="font-display text-xs tracking-wider text-game-orange mb-1">ATK</p>
-              <p className="font-display text-2xl font-bold">{selected.atk}</p>
-            </div>
-            <div className="bg-secondary rounded-lg p-3 text-center">
-              <p className="font-display text-xs tracking-wider text-game-blue mb-1">DEF</p>
-              <p className="font-display text-2xl font-bold">{selected.def}</p>
-            </div>
+            {(["hp", "atk", "def"] as const).map((stat) => {
+              const colors = {
+                hp: "text-destructive",
+                atk: "text-game-orange",
+                def: "text-game-blue",
+              };
+              return (
+                <div key={stat} className="bg-secondary rounded-lg p-3 text-center">
+                  <p className={`font-display text-xs tracking-wider ${colors[stat]} mb-1`}>
+                    {stat.toUpperCase()}
+                  </p>
+                  <input
+                    type="number"
+                    min={0}
+                    value={selected[stat]}
+                    onChange={(e) => handleStatChange(stat, e.target.value)}
+                    className="w-full bg-transparent text-center font-display text-2xl font-bold text-foreground outline-none focus:ring-1 focus:ring-primary rounded [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                </div>
+              );
+            })}
           </div>
 
           {/* Strategy code editor */}
@@ -142,8 +162,8 @@ const SetupPhase = () => {
               STRATEGY CODE
             </label>
             <textarea
-              value={strategies[selectedId] || ""}
-              onChange={(e) => handleStrategyChange(e.target.value)}
+              value={selected.strategy}
+              onChange={(e) => updateCharField("strategy", e.target.value)}
               rows={6}
               spellCheck={false}
               className="w-full bg-muted rounded-lg px-4 py-3 font-mono text-sm text-foreground border border-border focus:outline-none focus:ring-1 focus:ring-primary resize-none leading-relaxed"

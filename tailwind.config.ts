@@ -12,6 +12,10 @@ export default {
         "2xl": "1400px",
       },
     },
+    fontFamily: {
+      display: ['Orbitron', 'sans-serif'],
+      body: ['Rajdhani', 'sans-serif'],
+    },
     extend: {
       colors: {
         border: "hsl(var(--border))",
@@ -46,6 +50,12 @@ export default {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
+        },
+        game: {
+          glow: "hsl(var(--game-glow))",
+          orange: "hsl(var(--game-orange))",
+          blue: "hsl(var(--game-blue))",
+          surface: "hsl(var(--game-surface))",
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",

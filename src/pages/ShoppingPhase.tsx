@@ -143,7 +143,7 @@ const ShoppingPhase = () => {
       setSelectedHex(null);
       setSelectedShopIdx(null);
     } else {
-      navigate(`/?mode=${mode}`);
+      navigate(`/execution?mode=${mode}`);
     }
   };
 

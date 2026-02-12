@@ -35,10 +35,8 @@ interface HexCell {
   character: Character | null;
 }
 
-function randomShop(): (Character | null)[] {
-  return Array.from({ length: SHOP_SIZE }, () =>
-    CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)]
-  );
+function createShop(): Character[] {
+  return [...CHARACTERS];
 }
 
 function createInitialGrid(): HexCell[][] {
@@ -72,7 +70,7 @@ const ShoppingPhase = () => {
   const [gold, setGold] = useState<Record<1 | 2, number>>({ 1: INITIAL_GOLD, 2: INITIAL_GOLD });
   const [grid, setGrid] = useState<HexCell[][]>(createInitialGrid);
   const [selectedHex, setSelectedHex] = useState<{ r: number; c: number } | null>(null);
-  const [shop, setShop] = useState<(Character | null)[]>(randomShop);
+  const [shop] = useState<Character[]>(createShop);
   const [selectedShopIdx, setSelectedShopIdx] = useState<number | null>(null);
 
   const ownedCount = useCallback(
@@ -134,7 +132,6 @@ const ShoppingPhase = () => {
       next[r][c].character = { ...char };
       return next;
     });
-    setShop((prev) => { const n = [...prev]; n[selectedShopIdx] = null; return n; });
     setGold((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] - char.cost }));
     setSelectedShopIdx(null);
     setSelectedHex(null);
@@ -145,7 +142,6 @@ const ShoppingPhase = () => {
       setCurrentPlayer(2);
       setSelectedHex(null);
       setSelectedShopIdx(null);
-      setShop(randomShop());
     } else {
       navigate(`/?mode=${mode}`);
     }
@@ -313,29 +309,20 @@ const ShoppingPhase = () => {
         <div className="flex items-center gap-2 px-4 py-2">
           <span className="font-display text-[10px] tracking-wider text-muted-foreground mr-1 shrink-0">SHOP</span>
           {shop.map((char, idx) => (
-            <AnimatePresence key={idx} mode="popLayout">
-              {char ? (
-                <motion.button
-                  key={char.id + idx}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  whileHover={{ y: -4 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setSelectedShopIdx(selectedShopIdx === idx ? null : idx)}
-                  disabled={gold[currentPlayer] < char.cost}
-                  className={`flex-1 h-16 rounded-lg border-2 ${tierColors[char.tier]} bg-secondary flex flex-col items-center justify-center gap-0.5 disabled:opacity-30 hover:bg-muted transition-colors cursor-pointer min-w-0 ${
-                    selectedShopIdx === idx ? "ring-2 ring-primary bg-primary/20" : ""
-                  }`}
-                >
-                  <span className="text-xl">{char.emoji}</span>
-                  <span className="font-display text-[9px] tracking-wider">{char.name}</span>
-                  <span className="font-display text-[9px] text-primary font-bold">{char.cost}g</span>
-                </motion.button>
-              ) : (
-                <div key={"empty" + idx} className="flex-1 h-16 rounded-lg border border-border/20 bg-muted/20 min-w-0" />
-              )}
-            </AnimatePresence>
+              <motion.button
+                key={char.id}
+                whileHover={{ y: -4 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setSelectedShopIdx(selectedShopIdx === idx ? null : idx)}
+                disabled={gold[currentPlayer] < char.cost}
+                className={`flex-1 h-16 rounded-lg border-2 ${tierColors[char.tier]} bg-secondary flex flex-col items-center justify-center gap-0.5 disabled:opacity-30 hover:bg-muted transition-colors cursor-pointer min-w-0 ${
+                  selectedShopIdx === idx ? "ring-2 ring-primary bg-primary/20" : ""
+                }`}
+              >
+                <span className="text-xl">{char.emoji}</span>
+                <span className="font-display text-[9px] tracking-wider">{char.name}</span>
+                <span className="font-display text-[9px] text-primary font-bold">{char.cost}g</span>
+              </motion.button>
           ))}
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 
 interface Character {
   id: string;
@@ -25,9 +25,7 @@ const ROWS = 8;
 const COLS = 8;
 const INITIAL_GOLD = 20;
 const HEX_COST = 3;
-const REFRESH_COST = 1;
 const SHOP_SIZE = 5;
-const BENCH_SIZE = 8;
 
 type CellOwner = null | 1 | 2;
 interface HexCell {
@@ -75,12 +73,7 @@ const ShoppingPhase = () => {
   const [grid, setGrid] = useState<HexCell[][]>(createInitialGrid);
   const [selectedHex, setSelectedHex] = useState<{ r: number; c: number } | null>(null);
   const [shop, setShop] = useState<(Character | null)[]>(randomShop);
-  const [bench, setBench] = useState<Record<1 | 2, (Character | null)[]>>({
-    1: Array(BENCH_SIZE).fill(null),
-    2: Array(BENCH_SIZE).fill(null),
-  });
-  const [selectedBenchIdx, setSelectedBenchIdx] = useState<number | null>(null);
-  const [level, setLevel] = useState<Record<1 | 2, number>>({ 1: 2, 2: 2 });
+  const [selectedShopIdx, setSelectedShopIdx] = useState<number | null>(null);
 
   const ownedCount = useCallback(
     (player: 1 | 2) => grid.flat().filter((c) => c.owner === player).length,
@@ -92,7 +85,10 @@ const ShoppingPhase = () => {
     [grid]
   );
 
-  const maxUnits = useCallback((player: 1 | 2) => level[player], [level]);
+  const maxUnits = useCallback(
+    (player: 1 | 2) => ownedCount(player),
+    [ownedCount]
+  );
 
   const isAdjacentToOwned = (r: number, c: number, player: 1 | 2): boolean => {
     const offsets = r % 2 === 0
@@ -103,30 +99,6 @@ const ShoppingPhase = () => {
       if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) return false;
       return grid[nr][nc].owner === player;
     });
-  };
-
-  // Buy from shop → bench
-  const buyFromShop = (idx: number) => {
-    const char = shop[idx];
-    if (!char) return;
-    if (gold[currentPlayer] < char.cost) return;
-    const benchSlot = bench[currentPlayer].findIndex((s) => s === null);
-    if (benchSlot === -1) return;
-
-    setShop((prev) => { const n = [...prev]; n[idx] = null; return n; });
-    setBench((prev) => {
-      const n = { ...prev, [currentPlayer]: [...prev[currentPlayer]] };
-      n[currentPlayer][benchSlot] = { ...char };
-      return n;
-    });
-    setGold((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] - char.cost }));
-  };
-
-  // Refresh shop
-  const refreshShop = () => {
-    if (gold[currentPlayer] < REFRESH_COST) return;
-    setShop(randomShop());
-    setGold((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] - REFRESH_COST }));
   };
 
   // Buy hex
@@ -146,11 +118,12 @@ const ShoppingPhase = () => {
     setSelectedHex(null);
   };
 
-  // Place from bench → board
-  const placeOnBoard = () => {
-    if (selectedBenchIdx === null || !selectedHex) return;
-    const char = bench[currentPlayer][selectedBenchIdx];
+  // Buy from shop → place directly on selected hex
+  const placeFromShop = () => {
+    if (selectedShopIdx === null || !selectedHex) return;
+    const char = shop[selectedShopIdx];
     if (!char) return;
+    if (gold[currentPlayer] < char.cost) return;
     const { r, c } = selectedHex;
     const cell = grid[r][c];
     if (cell.owner !== currentPlayer || cell.character !== null) return;
@@ -161,40 +134,17 @@ const ShoppingPhase = () => {
       next[r][c].character = { ...char };
       return next;
     });
-    setBench((prev) => {
-      const n = { ...prev, [currentPlayer]: [...prev[currentPlayer]] };
-      n[currentPlayer][selectedBenchIdx] = null;
-      return n;
-    });
-    setSelectedBenchIdx(null);
+    setShop((prev) => { const n = [...prev]; n[selectedShopIdx] = null; return n; });
+    setGold((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] - char.cost }));
+    setSelectedShopIdx(null);
     setSelectedHex(null);
-  };
-
-  // Sell from bench
-  const sellFromBench = (idx: number) => {
-    const char = bench[currentPlayer][idx];
-    if (!char) return;
-    setBench((prev) => {
-      const n = { ...prev, [currentPlayer]: [...prev[currentPlayer]] };
-      n[currentPlayer][idx] = null;
-      return n;
-    });
-    setGold((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] + char.cost }));
-    setSelectedBenchIdx(null);
-  };
-
-  // Buy XP / level up
-  const buyXP = () => {
-    if (gold[currentPlayer] < 4) return;
-    setGold((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] - 4 }));
-    setLevel((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] + 1 }));
   };
 
   const handleDone = () => {
     if (currentPlayer === 1) {
       setCurrentPlayer(2);
       setSelectedHex(null);
-      setSelectedBenchIdx(null);
+      setSelectedShopIdx(null);
       setShop(randomShop());
     } else {
       navigate(`/?mode=${mode}`);
@@ -252,10 +202,6 @@ const ShoppingPhase = () => {
             <span className="font-display text-lg font-bold text-primary">{gold[currentPlayer]}</span>
           </div>
           <div className="flex items-center gap-1.5 font-display text-sm">
-            <span className="text-muted-foreground">LV</span>
-            <span className="font-bold">{level[currentPlayer]}</span>
-          </div>
-          <div className="flex items-center gap-1.5 font-display text-sm">
             <span className="text-muted-foreground">UNITS</span>
             <span className="font-bold">{charOnBoard(currentPlayer)}/{maxUnits(currentPlayer)}</span>
           </div>
@@ -309,9 +255,9 @@ const ShoppingPhase = () => {
             </motion.button>
             <motion.button
               whileTap={{ scale: 0.95 }}
-              onClick={placeOnBoard}
+              onClick={placeFromShop}
               disabled={
-                selectedBenchIdx === null ||
+                selectedShopIdx === null ||
                 !selectedHex ||
                 grid[selectedHex?.r ?? 0][selectedHex?.c ?? 0]?.owner !== currentPlayer ||
                 grid[selectedHex?.r ?? 0][selectedHex?.c ?? 0]?.character !== null ||
@@ -342,23 +288,11 @@ const ShoppingPhase = () => {
             )}
           </div>
 
-          {/* Buy XP */}
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={buyXP}
-            disabled={gold[currentPlayer] < 4}
-            className="w-full px-3 py-2 rounded-lg bg-secondary text-secondary-foreground font-display text-xs font-bold tracking-wider disabled:opacity-30 border border-border hover:border-game-blue/50 transition-colors"
-          >
-            Buy XP (4g) → LV{level[currentPlayer] + 1}
-          </motion.button>
-
           {/* Costs */}
           <div className="bg-secondary rounded-lg p-3">
             <p className="font-display text-[10px] tracking-wider text-muted-foreground mb-1">COSTS</p>
             <div className="font-body text-xs space-y-0.5 text-muted-foreground">
               <p>🔷 Hex: {HEX_COST}g</p>
-              <p>🔄 Refresh: {REFRESH_COST}g</p>
-              <p>⬆️ XP: 4g</p>
             </div>
           </div>
 
@@ -374,47 +308,10 @@ const ShoppingPhase = () => {
         </div>
       </div>
 
-      {/* Bottom: Bench + Shop (TFT style) */}
+      {/* Bottom: Shop */}
       <div className="shrink-0 border-t border-border bg-card">
-        {/* Bench row */}
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-border/50">
-          <span className="font-display text-[10px] tracking-wider text-muted-foreground mr-2 shrink-0">BENCH</span>
-          {bench[currentPlayer].map((char, idx) => (
-            <motion.div
-              key={idx}
-              whileHover={{ scale: 1.08 }}
-              onClick={() => {
-                if (char) setSelectedBenchIdx(selectedBenchIdx === idx ? null : idx);
-              }}
-              onDoubleClick={() => { if (char) sellFromBench(idx); }}
-              className={`w-12 h-12 rounded-lg border flex items-center justify-center text-lg cursor-pointer transition-all shrink-0 ${
-                char
-                  ? selectedBenchIdx === idx
-                    ? "bg-primary/20 border-primary game-card-selected"
-                    : `bg-secondary ${tierColors[char.tier]} border-opacity-60`
-                  : "bg-muted/30 border-border/30"
-              }`}
-              title={char ? `${char.name} (cost ${char.cost}) — double-click to sell` : "Empty"}
-            >
-              {char ? char.emoji : ""}
-            </motion.div>
-          ))}
-          <span className="font-body text-[10px] text-muted-foreground ml-auto">dbl-click to sell</span>
-        </div>
-
-        {/* Shop row */}
         <div className="flex items-center gap-2 px-4 py-2">
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={refreshShop}
-            disabled={gold[currentPlayer] < REFRESH_COST}
-            className="shrink-0 w-10 h-16 rounded-lg bg-secondary border border-border flex flex-col items-center justify-center gap-0.5 font-display text-xs disabled:opacity-30 hover:border-primary/50 transition-colors"
-            title={`Refresh (${REFRESH_COST}g)`}
-          >
-            <span className="text-base">🔄</span>
-            <span className="text-[9px] text-muted-foreground">{REFRESH_COST}g</span>
-          </motion.button>
-
+          <span className="font-display text-[10px] tracking-wider text-muted-foreground mr-1 shrink-0">SHOP</span>
           {shop.map((char, idx) => (
             <AnimatePresence key={idx} mode="popLayout">
               {char ? (
@@ -425,9 +322,11 @@ const ShoppingPhase = () => {
                   exit={{ opacity: 0, scale: 0.8 }}
                   whileHover={{ y: -4 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => buyFromShop(idx)}
-                  disabled={gold[currentPlayer] < char.cost || bench[currentPlayer].every((s) => s !== null)}
-                  className={`flex-1 h-16 rounded-lg border-2 ${tierColors[char.tier]} bg-secondary flex flex-col items-center justify-center gap-0.5 disabled:opacity-30 hover:bg-muted transition-colors cursor-pointer min-w-0`}
+                  onClick={() => setSelectedShopIdx(selectedShopIdx === idx ? null : idx)}
+                  disabled={gold[currentPlayer] < char.cost}
+                  className={`flex-1 h-16 rounded-lg border-2 ${tierColors[char.tier]} bg-secondary flex flex-col items-center justify-center gap-0.5 disabled:opacity-30 hover:bg-muted transition-colors cursor-pointer min-w-0 ${
+                    selectedShopIdx === idx ? "ring-2 ring-primary bg-primary/20" : ""
+                  }`}
                 >
                   <span className="text-xl">{char.emoji}</span>
                   <span className="font-display text-[9px] tracking-wider">{char.name}</span>

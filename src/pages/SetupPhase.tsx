@@ -158,9 +158,21 @@ const SetupPhase = () => {
 
           {/* Strategy code editor */}
           <div>
-            <label className="font-display text-xs tracking-wider text-muted-foreground block mb-2">
-              STRATEGY CODE
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="font-display text-xs tracking-wider text-muted-foreground">
+                STRATEGY CODE
+              </label>
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  const def = DEFAULT_CHARACTERS.find((c) => c.id === selectedId);
+                  if (def) updateCharField("strategy", def.strategy);
+                }}
+                className="px-3 py-1 rounded bg-secondary border border-border text-muted-foreground font-display text-[10px] tracking-wider hover:border-destructive/50 hover:text-destructive transition-colors"
+              >
+                RESET
+              </motion.button>
+            </div>
             <textarea
               value={selected.strategy}
               onChange={(e) => updateCharField("strategy", e.target.value)}

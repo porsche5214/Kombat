@@ -36,6 +36,8 @@ const SetupPhase = () => {
   const [characters, setCharacters] = useState<Character[]>(
     DEFAULT_CHARACTERS.map((c) => ({ ...c }))
   );
+  const [maxTurns, setMaxTurns] = useState(10);
+  const [maxGold, setMaxGold] = useState(50);
 
   const selected = characters.find((c) => c.id === selectedId) || characters[0];
 
@@ -183,6 +185,46 @@ const SetupPhase = () => {
           </div>
         </motion.div>
 
+        {/* Game limits */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="game-card p-6 mb-6"
+        >
+          <h3 className="font-display text-xs tracking-wider text-muted-foreground mb-4">GAME LIMITS</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-secondary rounded-lg p-3 text-center">
+              <p className="font-display text-xs tracking-wider text-primary mb-1">MAX TURNS</p>
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={maxTurns}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!isNaN(v) && v >= 1 && v <= 99) setMaxTurns(v);
+                }}
+                className="w-full bg-transparent text-center font-display text-2xl font-bold text-foreground outline-none focus:ring-1 focus:ring-primary rounded [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
+            <div className="bg-secondary rounded-lg p-3 text-center">
+              <p className="font-display text-xs tracking-wider text-game-orange mb-1">MAX GOLD</p>
+              <input
+                type="number"
+                min={1}
+                max={999}
+                value={maxGold}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!isNaN(v) && v >= 1 && v <= 999) setMaxGold(v);
+                }}
+                className="w-full bg-transparent text-center font-display text-2xl font-bold text-foreground outline-none focus:ring-1 focus:ring-primary rounded [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
+          </div>
+        </motion.div>
+
         <div className="flex justify-end">
           <motion.button
             initial={{ opacity: 0 }}
@@ -190,7 +232,10 @@ const SetupPhase = () => {
             transition={{ delay: 0.3 }}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.97 }}
-            onClick={() => navigate(`/shopping?mode=${mode}`)}
+            onClick={() => {
+              localStorage.setItem("gameSettings", JSON.stringify({ maxTurns, maxGold }));
+              navigate(`/shopping?mode=${mode}&turn=1`);
+            }}
             className="px-8 py-3 rounded-lg bg-primary text-primary-foreground font-display font-bold text-sm tracking-wider glow-primary"
           >
             Start Game

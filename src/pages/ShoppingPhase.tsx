@@ -65,13 +65,34 @@ const ShoppingPhase = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get("mode") || "duel";
+  const currentTurn = parseInt(searchParams.get("turn") || "1", 10);
 
-  const [currentPlayer, setCurrentPlayer] = useState<1 | 2>(1);
-  const [gold, setGold] = useState<Record<1 | 2, number>>({ 1: INITIAL_GOLD, 2: INITIAL_GOLD });
-  const [grid, setGrid] = useState<HexCell[][]>(createInitialGrid);
+  const gameSettings = JSON.parse(localStorage.getItem("gameSettings") || '{"maxTurns":10,"maxGold":50}');
+  const { maxTurns, maxGold } = gameSettings;
+
+  // Turn 1: both players shop. Turn 2+: odd=P1 only, even=P2 only
+  const getShoppingPlayers = (): (1 | 2)[] => {
+    if (currentTurn === 1) return [1, 2];
+    return currentTurn % 2 === 1 ? [1] : [2];
+  };
+  const shoppingPlayers = getShoppingPlayers();
+
+  const [currentPlayer, setCurrentPlayer] = useState<1 | 2>(shoppingPlayers[0]);
+  const [gold, setGold] = useState<Record<1 | 2, number>>(() => {
+    const saved = localStorage.getItem("gameGold");
+    if (saved) return JSON.parse(saved);
+    return { 1: INITIAL_GOLD, 2: INITIAL_GOLD };
+  });
+  const [grid, setGrid] = useState<HexCell[][]>(() => {
+    const saved = localStorage.getItem("gameGrid");
+    if (saved) return JSON.parse(saved);
+    return createInitialGrid();
+  });
   const [selectedHex, setSelectedHex] = useState<{ r: number; c: number } | null>(null);
   const [shop] = useState<Character[]>(createShop);
   const [selectedShopIdx, setSelectedShopIdx] = useState<number | null>(null);
+
+  const canCurrentPlayerShop = shoppingPlayers.includes(currentPlayer);
 
   const ownedCount = useCallback(
     (player: 1 | 2) => grid.flat().filter((c) => c.owner === player).length,
@@ -101,7 +122,7 @@ const ShoppingPhase = () => {
 
   // Buy hex
   const buyHex = () => {
-    if (!selectedHex) return;
+    if (!canCurrentPlayerShop || !selectedHex) return;
     const { r, c } = selectedHex;
     const cell = grid[r][c];
     if (cell.owner !== null || gold[currentPlayer] < HEX_COST) return;
@@ -112,13 +133,13 @@ const ShoppingPhase = () => {
       next[r][c].owner = currentPlayer;
       return next;
     });
-    setGold((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] - HEX_COST }));
+    setGold((prev) => ({ ...prev, [currentPlayer]: Math.max(0, prev[currentPlayer] - HEX_COST) }));
     setSelectedHex(null);
   };
 
   // Buy from shop → place directly on selected hex
   const placeFromShop = () => {
-    if (selectedShopIdx === null || !selectedHex) return;
+    if (!canCurrentPlayerShop || selectedShopIdx === null || !selectedHex) return;
     const char = shop[selectedShopIdx];
     if (!char) return;
     if (gold[currentPlayer] < char.cost) return;
@@ -132,18 +153,26 @@ const ShoppingPhase = () => {
       next[r][c].character = { ...char };
       return next;
     });
-    setGold((prev) => ({ ...prev, [currentPlayer]: prev[currentPlayer] - char.cost }));
+    setGold((prev) => ({ ...prev, [currentPlayer]: Math.max(0, prev[currentPlayer] - char.cost) }));
     setSelectedShopIdx(null);
     setSelectedHex(null);
   };
 
   const handleDone = () => {
-    if (currentPlayer === 1) {
+    // Save state before navigating
+    const saveAndGo = () => {
+      localStorage.setItem("gameGrid", JSON.stringify(grid));
+      localStorage.setItem("gameGold", JSON.stringify(gold));
+      navigate(`/execution?mode=${mode}&turn=${currentTurn}`);
+    };
+
+    if (shoppingPlayers.length === 2 && currentPlayer === 1) {
+      // Turn 1: P1 done, switch to P2
       setCurrentPlayer(2);
       setSelectedHex(null);
       setSelectedShopIdx(null);
     } else {
-      navigate(`/execution?mode=${mode}`);
+      saveAndGo();
     }
   };
 
@@ -191,6 +220,10 @@ const ShoppingPhase = () => {
             P{currentPlayer}
           </span>
           <span className="font-display text-xs text-muted-foreground tracking-wider">SHOPPING</span>
+          <span className="font-display text-xs font-bold text-primary tracking-wider">TURN {currentTurn}/{maxTurns}</span>
+          {!canCurrentPlayerShop && (
+            <span className="font-display text-[10px] text-destructive tracking-wider">⛔ SKIP</span>
+          )}
         </div>
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-1.5">
@@ -299,7 +332,7 @@ const ShoppingPhase = () => {
             onClick={handleDone}
             className="w-full px-4 py-3 rounded-lg bg-accent text-accent-foreground font-display text-sm font-bold tracking-wider glow-primary mt-auto"
           >
-            {currentPlayer === 1 ? "Done → P2" : "Done → Battle"}
+            {shoppingPlayers.length === 2 && currentPlayer === 1 ? "Done → P2" : "Done → Battle"}
           </motion.button>
         </div>
       </div>

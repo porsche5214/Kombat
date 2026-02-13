@@ -177,7 +177,7 @@ const ShoppingPhase = () => {
   };
 
   // Hex rendering
-  const hexSize = 26;
+  const hexSize = 36;
   const hexW = Math.sqrt(3) * hexSize;
   const hexH = 2 * hexSize;
   const svgW = hexW * COLS + hexW / 2 + 8;
@@ -245,7 +245,7 @@ const ShoppingPhase = () => {
       <div className="flex-1 flex overflow-hidden">
         {/* Board center */}
         <div className="flex-1 flex flex-col items-center justify-center relative">
-          <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full max-w-[520px]">
+          <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full max-w-[720px]">
             {grid.map((row, r) =>
               row.map((cell, c) => {
                 const { x, y } = hexCenter(r, c);

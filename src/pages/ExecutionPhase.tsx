@@ -247,13 +247,22 @@ const ExecutionPhase = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get("mode") || "duel";
+  const gameTurn = parseInt(searchParams.get("turn") || "1", 10);
 
-  const [grid, setGrid] = useState<HexCell[][]>(createDemoGrid);
+  const gameSettings = JSON.parse(localStorage.getItem("gameSettings") || '{"maxTurns":10,"maxGold":50}');
+  const { maxTurns, maxGold } = gameSettings;
+
+  const [grid, setGrid] = useState<HexCell[][]>(() => {
+    const saved = localStorage.getItem("gameGrid");
+    if (saved) return JSON.parse(saved);
+    return createDemoGrid();
+  });
   const [turn, setTurn] = useState(1);
   const [stepIndex, setStepIndex] = useState(0);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [battleOver, setBattleOver] = useState(false);
+  const [turnComplete, setTurnComplete] = useState(false);
   const [winner, setWinner] = useState<1 | 2 | null>(null);
   const [currentActing, setCurrentActing] = useState<{ name: string; emoji: string; owner: 1 | 2 } | null>(null);
 
@@ -273,19 +282,46 @@ const ExecutionPhase = () => {
     return false;
   }, []);
 
+  // Go back to shopping with interest
+  const goToShopping = useCallback(() => {
+    const nextTurn = gameTurn + 1;
+    if (nextTurn > maxTurns) {
+      setBattleOver(true);
+      // Determine winner by remaining HP
+      const p1Hp = grid.flat().filter(c => c.character?.owner === 1).reduce((s, c) => s + (c.character?.hp || 0), 0);
+      const p2Hp = grid.flat().filter(c => c.character?.owner === 2).reduce((s, c) => s + (c.character?.hp || 0), 0);
+      if (p1Hp > p2Hp) setWinner(1);
+      else if (p2Hp > p1Hp) setWinner(2);
+      else setWinner(null);
+      return;
+    }
+    // Interest: 10% of current gold, capped at maxGold
+    const savedGold = JSON.parse(localStorage.getItem("gameGold") || '{"1":0,"2":0}');
+    const interest1 = Math.floor(savedGold["1"] * 0.1);
+    const interest2 = Math.floor(savedGold["2"] * 0.1);
+    const newGold = {
+      "1": Math.min(maxGold, savedGold["1"] + interest1 + 5),
+      "2": Math.min(maxGold, savedGold["2"] + interest2 + 5),
+    };
+    localStorage.setItem("gameGold", JSON.stringify(newGold));
+    localStorage.setItem("gameGrid", JSON.stringify(grid));
+    navigate(`/shopping?mode=${mode}&turn=${nextTurn}`);
+  }, [gameTurn, maxTurns, maxGold, grid, navigate, mode]);
+
   // Execute one step
   const executeStep = useCallback(() => {
+    if (turnComplete || battleOver) return;
+
     setGrid((prevGrid) => {
-      const order = getExecutionOrder(prevGrid, turn);
+      const order = getExecutionOrder(prevGrid, gameTurn);
       if (stepIndex >= order.length) {
-        // End of turn
-        setTurn((t) => t + 1);
-        setStepIndex(0);
+        // Turn complete - stop and show "Back to Shop" button
+        setTurnComplete(true);
+        setIsRunning(false);
         return prevGrid;
       }
 
       const entry = order[stepIndex];
-      // Re-find position (may have moved)
       const pos = findChar(prevGrid, entry.char);
       if (!pos || entry.char.hp <= 0) {
         setStepIndex((s) => s + 1);
@@ -297,7 +333,7 @@ const ExecutionPhase = () => {
       setCurrentActing({ name: entry.char.name, emoji: entry.char.emoji, owner: entry.char.owner });
       setLogs((prev) => [
         ...prev,
-        { turn, characterName: entry.char.name, emoji: entry.char.emoji, owner: entry.char.owner, action },
+        { turn: gameTurn, characterName: entry.char.name, emoji: entry.char.emoji, owner: entry.char.owner, action },
       ]);
       setStepIndex((s) => s + 1);
 
@@ -307,7 +343,7 @@ const ExecutionPhase = () => {
 
       return newGrid;
     });
-  }, [turn, stepIndex, checkWin]);
+  }, [gameTurn, stepIndex, checkWin, turnComplete, battleOver]);
 
   // Auto-run
   useEffect(() => {
@@ -360,14 +396,14 @@ const ExecutionPhase = () => {
         <div className="flex items-center gap-4">
           <span className="font-display text-lg font-bold text-primary">⚔️ BATTLE</span>
           <span className="font-display text-xs text-muted-foreground tracking-wider">
-            TURN {turn}
+            GAME TURN {gameTurn}/{maxTurns}
           </span>
           <span className="font-display text-[10px] text-muted-foreground tracking-wider">
-            {turn % 2 === 1 ? "P1 FIRST" : "P2 FIRST"}
+            {gameTurn % 2 === 1 ? "P1 FIRST" : "P2 FIRST"}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {!battleOver && (
+          {!battleOver && !turnComplete && (
             <>
               <motion.button
                 whileTap={{ scale: 0.95 }}
@@ -385,6 +421,17 @@ const ExecutionPhase = () => {
                 STEP
               </motion.button>
             </>
+          )}
+          {turnComplete && !battleOver && (
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={goToShopping}
+              className="px-4 py-1.5 rounded-lg bg-accent text-accent-foreground font-display text-xs font-bold tracking-wider glow-primary"
+            >
+              🛒 BACK TO SHOP
+            </motion.button>
           )}
           {battleOver && (
             <motion.button

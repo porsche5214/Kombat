@@ -44,14 +44,14 @@ function createDemoGrid(): HexCell[][] {
     grid.push(row);
   }
 
-  // P1 units (bottom-left area)
+  // P1 units (mid-left area, close to center)
   const p1Units: Omit<Character, "owner" | "spawnOrder" | "maxHp">[] = [
     { id: "warrior", name: "Warrior", emoji: "⚔️", hp: 120, atk: 15, def: 10, strategy: "attack nearest" },
     { id: "healer", name: "Healer", emoji: "💚", hp: 90, atk: 10, def: 8, strategy: "heal lowest" },
     { id: "mage", name: "Mage", emoji: "🔮", hp: 80, atk: 25, def: 5, strategy: "attack weakest" },
   ];
   const p1Positions = [
-    [7, 0], [7, 1], [6, 0],
+    [4, 2], [5, 1], [5, 3],
   ];
 
   p1Units.forEach((u, i) => {
@@ -60,13 +60,13 @@ function createDemoGrid(): HexCell[][] {
     grid[r][c] = { row: r, col: c, owner: 1, character: char };
   });
 
-  // P2 units (top-right area)
+  // P2 units (mid-right area, close to center)
   const p2Units: Omit<Character, "owner" | "spawnOrder" | "maxHp">[] = [
     { id: "tank", name: "Tank", emoji: "🛡️", hp: 200, atk: 8, def: 20, strategy: "defend ally" },
     { id: "assassin", name: "Assassin", emoji: "🗡️", hp: 70, atk: 30, def: 3, strategy: "attack nearest" },
   ];
   const p2Positions = [
-    [0, 7], [0, 6],
+    [3, 5], [2, 4],
   ];
 
   p2Units.forEach((u, i) => {

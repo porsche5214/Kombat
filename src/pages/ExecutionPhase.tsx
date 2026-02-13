@@ -235,7 +235,6 @@ function moveToward(
 
   if (bestPos) {
     grid[bestPos[0]][bestPos[1]].character = char;
-    grid[bestPos[0]][bestPos[1]].owner = char.owner;
     grid[fromR][fromC].character = null;
     return { grid, action: actionDesc };
   }
@@ -353,7 +352,7 @@ const ExecutionPhase = () => {
   }, [isRunning, battleOver, executeStep, stepIndex, turn]);
 
   // Hex rendering
-  const hexSize = 26;
+  const hexSize = 36;
   const hexW = Math.sqrt(3) * hexSize;
   const hexH = 2 * hexSize;
   const svgW = hexW * COLS + hexW / 2 + 8;
@@ -462,7 +461,7 @@ const ExecutionPhase = () => {
             </motion.div>
           )}
 
-          <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full max-w-[520px]">
+          <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full max-w-[720px]">
             {grid.map((row, r) =>
               row.map((cell, c) => {
                 const { x, y } = hexCenter(r, c);

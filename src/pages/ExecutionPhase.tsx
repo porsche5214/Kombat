@@ -253,7 +253,24 @@ const ExecutionPhase = () => {
 
   const [grid, setGrid] = useState<HexCell[][]>(() => {
     const saved = localStorage.getItem("gameGrid");
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed: HexCell[][] = JSON.parse(saved);
+      // Normalize characters from shopping phase (add missing fields)
+      let spawnCounters = { 1: 0, 2: 0 } as Record<number, number>;
+      for (let r = 0; r < parsed.length; r++) {
+        for (let c = 0; c < parsed[r].length; c++) {
+          const ch = parsed[r][c].character;
+          if (ch) {
+            const owner = parsed[r][c].owner as 1 | 2;
+            ch.owner = owner;
+            ch.maxHp = ch.maxHp || ch.hp;
+            ch.spawnOrder = ch.spawnOrder ?? spawnCounters[owner]++;
+            ch.strategy = ch.strategy || "attack nearest";
+          }
+        }
+      }
+      return parsed;
+    }
     return createDemoGrid();
   });
   const [turn, setTurn] = useState(1);

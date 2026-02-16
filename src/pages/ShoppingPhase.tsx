@@ -25,7 +25,6 @@ const ROWS = 8;
 const COLS = 8;
 const INITIAL_GOLD = 20;
 const HEX_COST = 3;
-const SHOP_SIZE = 5;
 
 type CellOwner = null | 1 | 2;
 interface HexCell {
@@ -35,23 +34,21 @@ interface HexCell {
   character: Character | null;
 }
 
-function createShop(): Character[] {
-  return [...CHARACTERS];
-}
+// P1: top-left 5 hexes, P2: bottom-right 5 hexes (matching reference image)
+const P1_INITIAL: [number, number][] = [[0, 1], [0, 2], [1, 0], [1, 1], [1, 2]];
+const P2_INITIAL: [number, number][] = [[6, 6], [6, 7], [7, 5], [7, 6], [7, 7]];
 
 function createInitialGrid(): HexCell[][] {
   const grid: HexCell[][] = [];
   for (let r = 0; r < ROWS; r++) {
     const row: HexCell[] = [];
     for (let c = 0; c < COLS; c++) {
-      let owner: CellOwner = null;
-      let character: Character | null = null;
-      if (r === ROWS - 1 && c === 0) { owner = 1; character = CHARACTERS[0]; }
-      if (r === 0 && c === COLS - 1) { owner = 2; character = CHARACTERS[0]; }
-      row.push({ row: r, col: c, owner, character });
+      row.push({ row: r, col: c, owner: null, character: null });
     }
     grid.push(row);
   }
+  P1_INITIAL.forEach(([r, c]) => { grid[r][c].owner = 1; });
+  P2_INITIAL.forEach(([r, c]) => { grid[r][c].owner = 2; });
   return grid;
 }
 
@@ -60,6 +57,8 @@ const tierColors: Record<number, string> = {
   2: "border-game-blue",
   3: "border-game-orange",
 };
+
+type PopupType = "buyHex" | "buyChar" | null;
 
 const ShoppingPhase = () => {
   const navigate = useNavigate();
@@ -70,14 +69,10 @@ const ShoppingPhase = () => {
   const gameSettings = JSON.parse(localStorage.getItem("gameSettings") || '{"maxTurns":10,"maxGold":50}');
   const { maxTurns, maxGold } = gameSettings;
 
-  // Turn 1: both players shop. Turn 2+: odd=P1 only, even=P2 only
-  const getShoppingPlayers = (): (1 | 2)[] => {
-    if (currentTurn === 1) return [1, 2];
-    return currentTurn % 2 === 1 ? [1] : [2];
-  };
-  const shoppingPlayers = getShoppingPlayers();
+  // After execution, both players always shop simultaneously
+  const shoppingPlayers: (1 | 2)[] = [1, 2];
 
-  const [currentPlayer, setCurrentPlayer] = useState<1 | 2>(shoppingPlayers[0]);
+  const [currentPlayer, setCurrentPlayer] = useState<1 | 2>(1);
   const [gold, setGold] = useState<Record<1 | 2, number>>(() => {
     const saved = localStorage.getItem("gameGold");
     if (saved) return JSON.parse(saved);
@@ -88,11 +83,13 @@ const ShoppingPhase = () => {
     if (saved) return JSON.parse(saved);
     return createInitialGrid();
   });
-  const [selectedHex, setSelectedHex] = useState<{ r: number; c: number } | null>(null);
-  const [shop] = useState<Character[]>(createShop);
-  const [selectedShopIdx, setSelectedShopIdx] = useState<number | null>(null);
 
-  const canCurrentPlayerShop = shoppingPlayers.includes(currentPlayer);
+  // Track hex purchases per turn per player
+  const [hexBoughtThisTurn, setHexBoughtThisTurn] = useState<Record<1 | 2, boolean>>({ 1: false, 2: false });
+
+  // Popup state
+  const [popup, setPopup] = useState<PopupType>(null);
+  const [popupHex, setPopupHex] = useState<{ r: number; c: number } | null>(null);
 
   const ownedCount = useCallback(
     (player: 1 | 2) => grid.flat().filter((c) => c.owner === player).length,
@@ -120,13 +117,25 @@ const ShoppingPhase = () => {
     });
   };
 
+  const handleHexClick = (r: number, c: number) => {
+    const cell = grid[r][c];
+    if (cell.owner === null) {
+      // Empty hex → buy territory popup
+      if (!isAdjacentToOwned(r, c, currentPlayer)) return;
+      setPopupHex({ r, c });
+      setPopup("buyHex");
+    } else if (cell.owner === currentPlayer && cell.character === null) {
+      // Own hex without character → buy character popup
+      setPopupHex({ r, c });
+      setPopup("buyChar");
+    }
+  };
+
   // Buy hex
   const buyHex = () => {
-    if (!canCurrentPlayerShop || !selectedHex) return;
-    const { r, c } = selectedHex;
-    const cell = grid[r][c];
-    if (cell.owner !== null || gold[currentPlayer] < HEX_COST) return;
-    if (!isAdjacentToOwned(r, c, currentPlayer)) return;
+    if (!popupHex || hexBoughtThisTurn[currentPlayer]) return;
+    const { r, c } = popupHex;
+    if (gold[currentPlayer] < HEX_COST) return;
 
     setGrid((prev) => {
       const next = prev.map((row) => row.map((cell) => ({ ...cell })));
@@ -134,19 +143,17 @@ const ShoppingPhase = () => {
       return next;
     });
     setGold((prev) => ({ ...prev, [currentPlayer]: Math.max(0, prev[currentPlayer] - HEX_COST) }));
-    setSelectedHex(null);
+    setHexBoughtThisTurn((prev) => ({ ...prev, [currentPlayer]: true }));
+    setPopup(null);
+    setPopupHex(null);
   };
 
-  // Buy from shop → place directly on selected hex
-  const placeFromShop = () => {
-    if (!canCurrentPlayerShop || selectedShopIdx === null || !selectedHex) return;
-    const char = shop[selectedShopIdx];
-    if (!char) return;
+  // Place character from popup
+  const placeCharacter = (char: Character) => {
+    if (!popupHex) return;
     if (gold[currentPlayer] < char.cost) return;
-    const { r, c } = selectedHex;
-    const cell = grid[r][c];
-    if (cell.owner !== currentPlayer || cell.character !== null) return;
     if (charOnBoard(currentPlayer) >= maxUnits(currentPlayer)) return;
+    const { r, c } = popupHex;
 
     setGrid((prev) => {
       const next = prev.map((row) => row.map((cell) => ({ ...cell })));
@@ -154,23 +161,23 @@ const ShoppingPhase = () => {
       return next;
     });
     setGold((prev) => ({ ...prev, [currentPlayer]: Math.max(0, prev[currentPlayer] - char.cost) }));
-    setSelectedShopIdx(null);
-    setSelectedHex(null);
+    setPopup(null);
+    setPopupHex(null);
   };
 
   const handleDone = () => {
-    // Save state before navigating
     const saveAndGo = () => {
       localStorage.setItem("gameGrid", JSON.stringify(grid));
       localStorage.setItem("gameGold", JSON.stringify(gold));
       navigate(`/execution?mode=${mode}&turn=${currentTurn}`);
     };
 
-    if (shoppingPlayers.length === 2 && currentPlayer === 1) {
-      // Turn 1: P1 done, switch to P2
+    if (currentPlayer === 1) {
+      // P1 done → switch to P2
       setCurrentPlayer(2);
-      setSelectedHex(null);
-      setSelectedShopIdx(null);
+      setPopup(null);
+      setPopupHex(null);
+      setHexBoughtThisTurn((prev) => ({ ...prev })); // keep P2's hex bought status
     } else {
       saveAndGo();
     }
@@ -204,12 +211,20 @@ const ShoppingPhase = () => {
     return "fill-muted/50 stroke-border";
   };
 
-  const getHighlight = (r: number, c: number) => {
-    if (selectedHex?.r === r && selectedHex?.c === c) return "stroke-primary stroke-[2.5px]";
-    return "";
-  };
-
   const playerColor = currentPlayer === 1 ? "text-game-blue" : "text-game-orange";
+
+  // Get enabled characters from setup
+  const enabledChars: Character[] = (() => {
+    try {
+      const saved = localStorage.getItem("enabledCharacters");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Map to shop characters with costs
+        return CHARACTERS.filter((c) => parsed.some((e: any) => e.id === c.id));
+      }
+    } catch {}
+    return CHARACTERS;
+  })();
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
@@ -221,9 +236,6 @@ const ShoppingPhase = () => {
           </span>
           <span className="font-display text-xs text-muted-foreground tracking-wider">SHOPPING</span>
           <span className="font-display text-xs font-bold text-primary tracking-wider">TURN {currentTurn}/{maxTurns}</span>
-          {!canCurrentPlayerShop && (
-            <span className="font-display text-[10px] text-destructive tracking-wider">⛔ SKIP</span>
-          )}
         </div>
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-1.5">
@@ -238,6 +250,9 @@ const ShoppingPhase = () => {
             <span className="text-muted-foreground">HEX</span>
             <span className="font-bold">{ownedCount(currentPlayer)}</span>
           </div>
+          {hexBoughtThisTurn[currentPlayer] && (
+            <span className="font-display text-[10px] text-muted-foreground tracking-wider">HEX BOUGHT ✓</span>
+          )}
         </div>
       </div>
 
@@ -249,12 +264,21 @@ const ShoppingPhase = () => {
             {grid.map((row, r) =>
               row.map((cell, c) => {
                 const { x, y } = hexCenter(r, c);
+                const isClickable =
+                  (cell.owner === null && isAdjacentToOwned(r, c, currentPlayer)) ||
+                  (cell.owner === currentPlayer && cell.character === null);
                 return (
-                  <g key={`${r}-${c}`} onClick={() => setSelectedHex({ r, c })} className="cursor-pointer">
+                  <g
+                    key={`${r}-${c}`}
+                    onClick={() => handleHexClick(r, c)}
+                    className={isClickable ? "cursor-pointer" : ""}
+                  >
                     <polygon
                       points={hexPoints(x, y)}
-                      className={`${getCellColor(cell)} ${getHighlight(r, c)} transition-colors`}
-                      strokeWidth={selectedHex?.r === r && selectedHex?.c === c ? 2.5 : 1}
+                      className={`${getCellColor(cell)} transition-colors ${
+                        isClickable ? "hover:brightness-125" : ""
+                      }`}
+                      strokeWidth={1}
                     />
                     {cell.character && (
                       <text x={x} y={y + 1} textAnchor="middle" dominantBaseline="central" className="pointer-events-none select-none" fontSize="14">
@@ -266,62 +290,18 @@ const ShoppingPhase = () => {
               })
             )}
           </svg>
-
-          {/* Board actions */}
-          <div className="flex gap-2 mt-3">
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={buyHex}
-              disabled={
-                !selectedHex ||
-                grid[selectedHex?.r ?? 0][selectedHex?.c ?? 0]?.owner !== null ||
-                gold[currentPlayer] < HEX_COST ||
-                (selectedHex ? !isAdjacentToOwned(selectedHex.r, selectedHex.c, currentPlayer) : true)
-              }
-              className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground font-display text-xs font-bold tracking-wider disabled:opacity-30 border border-border hover:border-primary/50 transition-colors"
-            >
-              Buy Hex ({HEX_COST}g)
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={placeFromShop}
-              disabled={
-                selectedShopIdx === null ||
-                !selectedHex ||
-                grid[selectedHex?.r ?? 0][selectedHex?.c ?? 0]?.owner !== currentPlayer ||
-                grid[selectedHex?.r ?? 0][selectedHex?.c ?? 0]?.character !== null ||
-                charOnBoard(currentPlayer) >= maxUnits(currentPlayer)
-              }
-              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground font-display text-xs font-bold tracking-wider disabled:opacity-30 glow-primary"
-            >
-              Place Unit
-            </motion.button>
-          </div>
         </div>
 
         {/* Right side panel */}
         <div className="w-52 shrink-0 border-l border-border bg-card flex flex-col p-3 gap-3">
-          {/* Selected hex info */}
+          {/* Info */}
           <div className="bg-secondary rounded-lg p-3">
-            <p className="font-display text-[10px] tracking-wider text-muted-foreground mb-1">SELECTED HEX</p>
-            {selectedHex ? (
-              <p className="font-body text-sm">
-                ({selectedHex.r},{selectedHex.c}) —{" "}
-                {grid[selectedHex.r][selectedHex.c].owner ? `P${grid[selectedHex.r][selectedHex.c].owner}` : "Empty"}
-                {grid[selectedHex.r][selectedHex.c].character && (
-                  <span className="ml-1">{grid[selectedHex.r][selectedHex.c].character!.emoji}</span>
-                )}
-              </p>
-            ) : (
-              <p className="font-body text-xs text-muted-foreground">Click a hex</p>
-            )}
-          </div>
-
-          {/* Costs */}
-          <div className="bg-secondary rounded-lg p-3">
-            <p className="font-display text-[10px] tracking-wider text-muted-foreground mb-1">COSTS</p>
+            <p className="font-display text-[10px] tracking-wider text-muted-foreground mb-1">INFO</p>
             <div className="font-body text-xs space-y-0.5 text-muted-foreground">
-              <p>🔷 Hex: {HEX_COST}g</p>
+              <p>🔷 Hex cost: {HEX_COST}g</p>
+              <p>📦 Hex buy: {hexBoughtThisTurn[currentPlayer] ? "0" : "1"} left this turn</p>
+              <p>👥 Click empty hex → buy territory</p>
+              <p>🎯 Click your hex → place unit</p>
             </div>
           </div>
 
@@ -332,33 +312,115 @@ const ShoppingPhase = () => {
             onClick={handleDone}
             className="w-full px-4 py-3 rounded-lg bg-accent text-accent-foreground font-display text-sm font-bold tracking-wider glow-primary mt-auto"
           >
-            {shoppingPlayers.length === 2 && currentPlayer === 1 ? "Done → P2" : "Done → Battle"}
+            {currentPlayer === 1 ? "Done → P2" : "Done → Battle"}
           </motion.button>
         </div>
       </div>
 
-      {/* Bottom: Shop */}
-      <div className="shrink-0 border-t border-border bg-card">
-        <div className="flex items-center gap-2 px-4 py-2">
-          <span className="font-display text-[10px] tracking-wider text-muted-foreground mr-1 shrink-0">SHOP</span>
-          {shop.map((char, idx) => (
+      {/* Popups */}
+      <AnimatePresence>
+        {popup === "buyHex" && popupHex && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
+            onClick={() => setPopup(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card border border-border rounded-xl p-6 w-80"
+            >
+              <h3 className="font-display text-sm tracking-wider text-foreground mb-1">BUY TERRITORY</h3>
+              <p className="font-body text-xs text-muted-foreground mb-4">
+                Hex ({popupHex.r}, {popupHex.c}) — Cost: {HEX_COST}g
+              </p>
+              {hexBoughtThisTurn[currentPlayer] ? (
+                <p className="font-body text-sm text-destructive mb-4">Already bought a hex this turn!</p>
+              ) : gold[currentPlayer] < HEX_COST ? (
+                <p className="font-body text-sm text-destructive mb-4">Not enough gold!</p>
+              ) : null}
+              <div className="flex gap-2">
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={buyHex}
+                  disabled={hexBoughtThisTurn[currentPlayer] || gold[currentPlayer] < HEX_COST}
+                  className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-display text-xs font-bold tracking-wider disabled:opacity-30"
+                >
+                  BUY ({HEX_COST}g)
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setPopup(null)}
+                  className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground font-display text-xs tracking-wider border border-border"
+                >
+                  CANCEL
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {popup === "buyChar" && popupHex && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
+            onClick={() => setPopup(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card border border-border rounded-xl p-6 w-96"
+            >
+              <h3 className="font-display text-sm tracking-wider text-foreground mb-1">PLACE CHARACTER</h3>
+              <p className="font-body text-xs text-muted-foreground mb-4">
+                Hex ({popupHex.r}, {popupHex.c}) — Units: {charOnBoard(currentPlayer)}/{maxUnits(currentPlayer)}
+              </p>
+              {charOnBoard(currentPlayer) >= maxUnits(currentPlayer) && (
+                <p className="font-body text-sm text-destructive mb-3">Unit limit reached! Buy more hexes first.</p>
+              )}
+              <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
+                {enabledChars.map((char) => {
+                  const canAfford = gold[currentPlayer] >= char.cost;
+                  const unitsFull = charOnBoard(currentPlayer) >= maxUnits(currentPlayer);
+                  return (
+                    <motion.button
+                      key={char.id}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => placeCharacter(char)}
+                      disabled={!canAfford || unitsFull}
+                      className={`flex items-center gap-3 p-3 rounded-lg border-2 ${tierColors[char.tier]} bg-secondary hover:bg-muted transition-colors disabled:opacity-30 text-left`}
+                    >
+                      <span className="text-2xl">{char.emoji}</span>
+                      <div className="flex-1">
+                        <p className="font-display text-xs tracking-wider">{char.name}</p>
+                        <p className="font-body text-[10px] text-muted-foreground">
+                          HP:{char.hp} ATK:{char.atk} DEF:{char.def}
+                        </p>
+                      </div>
+                      <span className="font-display text-sm font-bold text-primary">{char.cost}g</span>
+                    </motion.button>
+                  );
+                })}
+              </div>
               <motion.button
-                key={char.id}
-                whileHover={{ y: -4 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setSelectedShopIdx(selectedShopIdx === idx ? null : idx)}
-                disabled={gold[currentPlayer] < char.cost}
-                className={`flex-1 h-16 rounded-lg border-2 ${tierColors[char.tier]} bg-secondary flex flex-col items-center justify-center gap-0.5 disabled:opacity-30 hover:bg-muted transition-colors cursor-pointer min-w-0 ${
-                  selectedShopIdx === idx ? "ring-2 ring-primary bg-primary/20" : ""
-                }`}
+                onClick={() => setPopup(null)}
+                className="w-full mt-3 px-4 py-2 rounded-lg bg-secondary text-secondary-foreground font-display text-xs tracking-wider border border-border"
               >
-                <span className="text-xl">{char.emoji}</span>
-                <span className="font-display text-[9px] tracking-wider">{char.name}</span>
-                <span className="font-display text-[9px] text-primary font-bold">{char.cost}g</span>
+                CANCEL
               </motion.button>
-          ))}
-        </div>
-      </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

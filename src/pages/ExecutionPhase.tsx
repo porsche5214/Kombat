@@ -321,6 +321,7 @@ const ExecutionPhase = () => {
     };
     localStorage.setItem("gameGold", JSON.stringify(newGold));
     localStorage.setItem("gameGrid", JSON.stringify(grid));
+    // Both players shop simultaneously after execution
     navigate(`/shopping?mode=${mode}&turn=${nextTurn}`);
   }, [gameTurn, maxTurns, maxGold, grid, navigate, mode]);
 

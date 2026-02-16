@@ -193,7 +193,7 @@ const ShoppingPhase = () => {
   const hexPoints = (cx: number, cy: number) => {
     const pts: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 180) * (60 * i - 30);
+      const angle = (Math.PI / 180) * (60 * i);
       pts.push(`${cx + hexSize * Math.cos(angle)},${cy + hexSize * Math.sin(angle)}`);
     }
     return pts.join(" ");
@@ -261,25 +261,63 @@ const ShoppingPhase = () => {
         {/* Board center */}
         <div className="flex-1 flex flex-col items-center justify-center relative">
           <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full max-w-[720px]">
+            <defs>
+              <filter id="glow-blue" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feFlood floodColor="hsl(210, 90%, 55%)" floodOpacity="0.6" result="color" />
+                <feComposite in="color" in2="blur" operator="in" result="shadow" />
+                <feMerge>
+                  <feMergeNode in="shadow" />
+                  <feMergeNode in="shadow" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <filter id="glow-orange" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feFlood floodColor="hsl(25, 95%, 55%)" floodOpacity="0.6" result="color" />
+                <feComposite in="color" in2="blur" operator="in" result="shadow" />
+                <feMerge>
+                  <feMergeNode in="shadow" />
+                  <feMergeNode in="shadow" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
             {grid.map((row, r) =>
               row.map((cell, c) => {
                 const { x, y } = hexCenter(r, c);
-                const isClickable =
-                  (cell.owner === null && isAdjacentToOwned(r, c, currentPlayer)) ||
-                  (cell.owner === currentPlayer && cell.character === null);
+                const canBuyHex = cell.owner === null && isAdjacentToOwned(r, c, currentPlayer);
+                const canPlaceChar = cell.owner === currentPlayer && cell.character === null;
+                const isClickable = canBuyHex || canPlaceChar;
+                const glowFilter = canBuyHex
+                  ? currentPlayer === 1 ? "url(#glow-blue)" : "url(#glow-orange)"
+                  : undefined;
                 return (
                   <g
                     key={`${r}-${c}`}
                     onClick={() => handleHexClick(r, c)}
                     className={isClickable ? "cursor-pointer" : ""}
                   >
-                    <polygon
-                      points={hexPoints(x, y)}
-                      className={`${getCellColor(cell)} transition-colors ${
-                        isClickable ? "hover:brightness-125" : ""
-                      }`}
-                      strokeWidth={1}
-                    />
+                    {canBuyHex && (
+                      <polygon
+                        points={hexPoints(x, y)}
+                        fill={currentPlayer === 1 ? "hsl(210, 90%, 55%)" : "hsl(25, 95%, 55%)"}
+                        fillOpacity={0.15}
+                        stroke={currentPlayer === 1 ? "hsl(210, 90%, 55%)" : "hsl(25, 95%, 55%)"}
+                        strokeWidth={1.5}
+                        filter={glowFilter}
+                        className="animate-pulse"
+                      />
+                    )}
+                    {!canBuyHex && (
+                      <polygon
+                        points={hexPoints(x, y)}
+                        className={`${getCellColor(cell)} transition-colors ${
+                          isClickable ? "hover:brightness-125" : ""
+                        }`}
+                        strokeWidth={1}
+                      />
+                    )}
                     {cell.character && (
                       <text x={x} y={y + 1} textAnchor="middle" dominantBaseline="central" className="pointer-events-none select-none" fontSize="14">
                         {cell.character.emoji}

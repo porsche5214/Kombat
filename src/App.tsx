@@ -7,8 +7,7 @@ import MainMenu from "./pages/MainMenu";
 import SelectMode from "./pages/SelectMode";
 import HowToPlay from "./pages/HowToPlay";
 import SetupPhase from "./pages/SetupPhase";
-import ShoppingPhase from "./pages/ShoppingPhase";
-import ExecutionPhase from "./pages/ExecutionPhase";
+import GamePhase from "./pages/GamePhase";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,8 +23,9 @@ const App = () => (
           <Route path="/select-mode" element={<SelectMode />} />
           <Route path="/how-to-play" element={<HowToPlay />} />
           <Route path="/setup" element={<SetupPhase />} />
-          <Route path="/shopping" element={<ShoppingPhase />} />
-          <Route path="/execution" element={<ExecutionPhase />} />
+          <Route path="/shopping" element={<GamePhase />} />
+          <Route path="/execution" element={<GamePhase />} />
+          <Route path="/game" element={<GamePhase />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

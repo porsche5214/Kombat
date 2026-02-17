@@ -213,20 +213,25 @@ const GamePhase = () => {
     const saved = localStorage.getItem("gameGrid");
     if (saved) {
       const parsed: HexCell[][] = JSON.parse(saved);
-      let spawnCounters = { 1: 0, 2: 0 } as Record<number, number>;
-      for (let r = 0; r < parsed.length; r++) {
-        for (let c = 0; c < parsed[r].length; c++) {
-          const ch = parsed[r][c].character;
-          if (ch) {
-            const owner = parsed[r][c].owner as 1 | 2;
-            ch.owner = owner;
-            ch.maxHp = ch.maxHp || ch.hp;
-            ch.spawnOrder = ch.spawnOrder ?? spawnCounters[owner]++;
-            ch.strategy = ch.strategy || "attack nearest";
+      // Validate grid dimensions match current ROWS/COLS
+      if (parsed.length === ROWS && parsed[0]?.length === COLS) {
+        let spawnCounters = { 1: 0, 2: 0 } as Record<number, number>;
+        for (let r = 0; r < parsed.length; r++) {
+          for (let c = 0; c < parsed[r].length; c++) {
+            const ch = parsed[r][c].character;
+            if (ch) {
+              const owner = parsed[r][c].owner as 1 | 2;
+              ch.owner = owner;
+              ch.maxHp = ch.maxHp || ch.hp;
+              ch.spawnOrder = ch.spawnOrder ?? spawnCounters[owner]++;
+              ch.strategy = ch.strategy || "attack nearest";
+            }
           }
         }
+        return parsed;
       }
-      return parsed;
+      // Old grid format — discard and start fresh
+      localStorage.removeItem("gameGrid");
     }
     return createInitialGrid();
   });
@@ -270,7 +275,7 @@ const GamePhase = () => {
   const maxUnits = useCallback((p: 1 | 2) => ownedCount(p), [ownedCount]);
 
   const isAdjacentToOwned = (r: number, c: number, player: 1 | 2): boolean => {
-    return getHexNeighbors(r, c).some(([nr, nc]) => grid[nr][nc].owner === player);
+    return getHexNeighbors(r, c).some(([nr, nc]) => grid[nr]?.[nc]?.owner === player);
   };
 
   // ─── Enabled characters from setup ───

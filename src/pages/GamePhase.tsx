@@ -42,14 +42,14 @@ const CHARACTERS: Character[] = [
   { id: "healer", name: "Healer", emoji: "💚", hp: 90, maxHp: 90, atk: 10, def: 8, cost: 2, tier: 1 },
 ];
 
-const ROWS = 9;
-const COLS = 10;
+const ROWS = 8;
+const COLS = 8;
 const INITIAL_GOLD = 20;
 const HEX_COST = 3;
 
-// P1: top-left 5 hexes, P2: bottom-right 5 hexes (matching reference image)
-const P1_INITIAL: [number, number][] = [[0, 2], [1, 1], [1, 2], [2, 0], [2, 1]];
-const P2_INITIAL: [number, number][] = [[6, 8], [6, 9], [7, 7], [7, 8], [8, 7]];
+// P1: top-left 5 hexes, P2: bottom-right 5 hexes
+const P1_INITIAL: [number, number][] = [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0]];
+const P2_INITIAL: [number, number][] = [[7, 7], [7, 6], [6, 7], [6, 6], [5, 7]];
 
 const tierColors: Record<number, string> = {
   1: "border-muted-foreground",
@@ -68,19 +68,21 @@ type GameStep =
 type PopupType = "buyHex" | "buyChar" | null;
 
 // ─── Hex Helpers ───────────────────────────────────────
+// Flat-top hex: column-offset (odd columns shifted down)
 function getHexNeighbors(r: number, c: number): [number, number][] {
-  const offsets = r % 2 === 0
-    ? [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]]
-    : [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]];
+  const offsets = c % 2 === 0
+    ? [[-1, 0], [1, 0], [-1, -1], [0, -1], [-1, 1], [0, 1]]
+    : [[-1, 0], [1, 0], [0, -1], [1, -1], [0, 1], [1, 1]];
   return offsets
     .map(([dr, dc]) => [r + dr, c + dc] as [number, number])
     .filter(([nr, nc]) => nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS);
 }
 
 function hexDistance(r1: number, c1: number, r2: number, c2: number): number {
+  // Flat-top offset (odd-q) to cube
   const toCube = (r: number, c: number) => {
-    const x = c - (r - (r & 1)) / 2;
-    const z = r;
+    const x = c;
+    const z = r - (c - (c & 1)) / 2;
     const y = -x - z;
     return { x, y, z };
   };
@@ -268,6 +270,43 @@ const GamePhase = () => {
 
   const logEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+
+  // Reset state when turn changes (React Router reuses the component)
+  const prevTurnRef = useRef(currentTurn);
+  useEffect(() => {
+    if (prevTurnRef.current !== currentTurn) {
+      prevTurnRef.current = currentTurn;
+      setStep({ type: "shopping", player: 1 });
+      setHexBoughtThisTurn({ 1: false, 2: false });
+      setExecComplete(false);
+      setExecStepIndex(0);
+      setIsRunning(false);
+      setCurrentActing(null);
+      setPopup(null);
+      setPopupHex(null);
+      // Reload grid/gold from localStorage
+      const savedGrid = localStorage.getItem("gameGrid");
+      if (savedGrid) {
+        const parsed: HexCell[][] = JSON.parse(savedGrid);
+        if (parsed.length === ROWS && parsed[0]?.length === COLS) {
+          let sc = { 1: 0, 2: 0 } as Record<number, number>;
+          for (const row of parsed) for (const cell of row) {
+            const ch = cell.character;
+            if (ch) {
+              ch.owner = cell.owner as 1 | 2;
+              ch.maxHp = ch.maxHp || ch.hp;
+              ch.spawnOrder = ch.spawnOrder ?? sc[ch.owner!]++;
+              ch.strategy = ch.strategy || "attack nearest";
+            }
+          }
+          setGrid(parsed);
+          setSpawnCounter(sc as Record<1 | 2, number>);
+        }
+      }
+      const savedGold = localStorage.getItem("gameGold");
+      if (savedGold) setGold(JSON.parse(savedGold));
+    }
+  }, [currentTurn]);
 
   // ─── Derived ───
   const ownedCount = useCallback((p: 1 | 2) => grid.flat().filter(c => c.owner === p).length, [grid]);
@@ -493,25 +532,25 @@ const GamePhase = () => {
     navigate(`/game?mode=${mode}&turn=${nextTurn}`);
   };
 
-  // ─── Hex rendering ───
+  // ─── Flat-top hex rendering ───
   const hexSize = 36;
-  const hexW = Math.sqrt(3) * hexSize;
-  const hexH = 2 * hexSize;
-  const svgW = hexW * COLS + hexW / 2 + 8;
-  const svgH = hexH * 0.75 * (ROWS - 1) + hexH + 8;
+  const hexW = 2 * hexSize; // flat-top width
+  const hexH = Math.sqrt(3) * hexSize; // flat-top height
+  const svgW = hexW * 0.75 * (COLS - 1) + hexW + 8;
+  const svgH = hexH * ROWS + hexH / 2 + 8;
 
   const hexPoints = (cx: number, cy: number) => {
     const pts: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 180) * (60 * i - 30);
+      const angle = (Math.PI / 180) * (60 * i); // flat-top: starts at 0°
       pts.push(`${cx + hexSize * Math.cos(angle)},${cy + hexSize * Math.sin(angle)}`);
     }
     return pts.join(" ");
   };
 
   const hexCenter = (r: number, c: number) => {
-    const x = 4 + hexW / 2 + c * hexW + (r % 2 === 1 ? hexW / 2 : 0);
-    const y = 4 + hexSize + r * hexH * 0.75;
+    const x = 4 + hexSize + c * hexW * 0.75;
+    const y = 4 + hexH / 2 + r * hexH + (c % 2 === 1 ? hexH / 2 : 0);
     return { x, y };
   };
 

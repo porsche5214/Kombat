@@ -23,6 +23,7 @@ interface HexCell {
   col: number;
   owner: null | 1 | 2;
   character: Character | null;
+  isValid: boolean;
 }
 
 interface LogEntry {
@@ -42,14 +43,36 @@ const CHARACTERS: Character[] = [
   { id: "healer", name: "Healer", emoji: "💚", hp: 90, maxHp: 90, atk: 10, def: 8, cost: 2, tier: 1 },
 ];
 
-const ROWS = 8;
-const COLS = 8;
+// ─── MAP CONFIGURATION (Full 8x8) ───
+const BOARD_LAYOUT = [
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+];
+
+const ROWS = BOARD_LAYOUT.length;
+const COLS = BOARD_LAYOUT[0].length;
 const INITIAL_GOLD = 20;
 const HEX_COST = 3;
 
-// P1: top-left 5 hexes, P2: bottom-right 5 hexes (pointy-top, even-r offset)
-const P1_INITIAL: [number, number][] = [[0, 1], [0, 2], [1, 0], [1, 1], [2, 0]];
-const P2_INITIAL: [number, number][] = [[7, 6], [7, 5], [6, 7], [6, 6], [5, 7]];
+// จุดเกิด P1 (2 แถวบน)
+const P1_INITIAL: [number, number][] = [
+  [0, 1], [0, 2], // แถวที่ 0
+  [1, 0], [1, 1], // แถวที่ 1
+  [2, 0]          // แถวที่ 2
+];
+
+// จุดเกิด P2 (2 แถวล่าง)
+const P2_INITIAL: [number, number][] = [
+  [7, 6], [7, 5], // แถวที่ 7 (ล่างสุด)
+  [6, 7], [6, 6], // แถวที่ 6
+  [5, 7]          // แถวที่ 5
+];
 
 const tierColors: Record<number, string> = {
   1: "border-muted-foreground",
@@ -58,8 +81,6 @@ const tierColors: Record<number, string> = {
 };
 
 // ─── Game Step State Machine ───────────────────────────
-// Turn 1: shop_p1 → shop_p2 → exec_all → next turn
-// Turn 2+: shop_p1 → exec_p1 → shop_p2 → exec_p2 → next turn
 type GameStep =
   | { type: "shopping"; player: 1 | 2 }
   | { type: "executing"; player: 1 | 2 | "all" }
@@ -67,22 +88,33 @@ type GameStep =
 
 type PopupType = "buyHex" | "buyChar" | null;
 
-// ─── Hex Helpers ───────────────────────────────────────
-// Pointy-top hex: even-r offset (even rows shifted right)
-function getHexNeighbors(r: number, c: number): [number, number][] {
-  const offsets = r % 2 === 0
-    ? [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]]
-    : [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]];
+// ─── Hex Helpers (FLAT TOPPED - EVEN Q) ────────────────
+// ใช้ระบบ Even-Q: Column คู่ (0, 2, 4...) จะถูกดันลงต่ำกว่า Column คี่
+
+function getHexNeighbors(r: number, c: number, grid?: HexCell[][]): [number, number][] {
+  // Flat-topped Even-Q Logic
+  // ถ้า Column เป็นเลขคู่ (Even) -> Shifted DOWN
+  const evenColOffsets = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, -1], [1, 1]];
+  // ถ้า Column เป็นเลขคี่ (Odd) -> HIGH
+  const oddColOffsets = [[-1, 0], [1, 0], [-1, -1], [-1, 1], [0, -1], [0, 1]];
+
+  const offsets = (c % 2 === 0) ? evenColOffsets : oddColOffsets;
+
   return offsets
     .map(([dr, dc]) => [r + dr, c + dc] as [number, number])
-    .filter(([nr, nc]) => nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS);
+    .filter(([nr, nc]) => {
+      if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) return false;
+      if (grid && !grid[nr][nc].isValid) return false;
+      if (!grid && BOARD_LAYOUT[nr] && BOARD_LAYOUT[nr][nc] === 0) return false;
+      return true;
+    });
 }
 
 function hexDistance(r1: number, c1: number, r2: number, c2: number): number {
-  // Pointy-top offset (even-r) to cube
+  // Convert Even-Q to Cube coordinates
   const toCube = (r: number, c: number) => {
-    const x = c - (r - (r & 1)) / 2;
-    const z = r;
+    const x = c;
+    const z = r - (c + (c & 1)) / 2;
     const y = -x - z;
     return { x, y, z };
   };
@@ -96,12 +128,14 @@ function createInitialGrid(): HexCell[][] {
   for (let r = 0; r < ROWS; r++) {
     const row: HexCell[] = [];
     for (let c = 0; c < COLS; c++) {
-      row.push({ row: r, col: c, owner: null, character: null });
+      const isValid = BOARD_LAYOUT[r][c] === 1;
+      row.push({ row: r, col: c, owner: null, character: null, isValid });
     }
     grid.push(row);
   }
-  P1_INITIAL.forEach(([r, c]) => { grid[r][c].owner = 1; });
-  P2_INITIAL.forEach(([r, c]) => { grid[r][c].owner = 2; });
+  
+  P1_INITIAL.forEach(([r, c]) => { if(grid[r] && grid[r][c] && grid[r][c].isValid) grid[r][c].owner = 1; });
+  P2_INITIAL.forEach(([r, c]) => { if(grid[r] && grid[r][c] && grid[r][c].isValid) grid[r][c].owner = 2; });
   return grid;
 }
 
@@ -110,6 +144,7 @@ function getExecutionOrder(grid: HexCell[][], playerFilter: 1 | 2 | "all", turn:
   const allChars: { char: Character; r: number; c: number }[] = [];
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
+      if (!grid[r][c].isValid) continue;
       const ch = grid[r][c].character;
       if (ch && ch.hp > 0) {
         if (playerFilter === "all" || ch.owner === playerFilter) {
@@ -136,8 +171,10 @@ function executeCharAction(grid: HexCell[][], char: Character, cr: number, cc: n
 
   const enemies: { char: Character; r: number; c: number; dist: number }[] = [];
   const allies: { char: Character; r: number; c: number; dist: number }[] = [];
+  
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
+      if (!newGrid[r][c].isValid) continue;
       const ch = newGrid[r][c].character;
       if (!ch || ch.hp <= 0) continue;
       if (ch.owner !== currentChar.owner) {
@@ -184,14 +221,16 @@ function executeCharAction(grid: HexCell[][], char: Character, cr: number, cc: n
 }
 
 function moveToward(grid: HexCell[][], char: Character, fromR: number, fromC: number, toR: number, toC: number, actionDesc: string) {
-  const neighbors = getHexNeighbors(fromR, fromC);
+  const neighbors = getHexNeighbors(fromR, fromC, grid);
   let bestPos: [number, number] | null = null;
   let bestDist = hexDistance(fromR, fromC, toR, toC);
+  
   for (const [nr, nc] of neighbors) {
-    if (grid[nr][nc].character !== null) continue;
+    if (!grid[nr][nc].isValid || grid[nr][nc].character !== null) continue;
     const d = hexDistance(nr, nc, toR, toC);
     if (d < bestDist) { bestDist = d; bestPos = [nr, nc]; }
   }
+  
   if (bestPos) {
     grid[bestPos[0]][bestPos[1]].character = char;
     grid[fromR][fromC].character = null;
@@ -215,14 +254,24 @@ const GamePhase = () => {
     const saved = localStorage.getItem("gameGrid");
     if (saved) {
       const parsed: HexCell[][] = JSON.parse(saved);
-      // Validate grid dimensions match current ROWS/COLS
       if (parsed.length === ROWS && parsed[0]?.length === COLS) {
         let spawnCounters = { 1: 0, 2: 0 } as Record<number, number>;
-        for (let r = 0; r < parsed.length; r++) {
-          for (let c = 0; c < parsed[r].length; c++) {
-            const ch = parsed[r][c].character;
+        
+        const resynced = parsed.map((row, r) => row.map((cell, c) => ({
+          ...cell,
+          isValid: BOARD_LAYOUT[r][c] === 1
+        })));
+
+        for (let r = 0; r < resynced.length; r++) {
+          for (let c = 0; c < resynced[r].length; c++) {
+            if (!resynced[r][c].isValid) {
+               resynced[r][c].character = null;
+               resynced[r][c].owner = null;
+               continue;
+            }
+            const ch = resynced[r][c].character;
             if (ch) {
-              const owner = parsed[r][c].owner as 1 | 2;
+              const owner = resynced[r][c].owner as 1 | 2;
               ch.owner = owner;
               ch.maxHp = ch.maxHp || ch.hp;
               ch.spawnOrder = ch.spawnOrder ?? spawnCounters[owner]++;
@@ -230,9 +279,8 @@ const GamePhase = () => {
             }
           }
         }
-        return parsed;
+        return resynced;
       }
-      // Old grid format — discard and start fresh
       localStorage.removeItem("gameGrid");
     }
     return createInitialGrid();
@@ -249,14 +297,12 @@ const GamePhase = () => {
   const [popup, setPopup] = useState<PopupType>(null);
   const [popupHex, setPopupHex] = useState<{ r: number; c: number } | null>(null);
 
-  // Execution state
   const [execStepIndex, setExecStepIndex] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentActing, setCurrentActing] = useState<{ name: string; emoji: string; owner: 1 | 2 } | null>(null);
   const [winner, setWinner] = useState<1 | 2 | null>(null);
   const [spawnCounter, setSpawnCounter] = useState<Record<1 | 2, number>>(() => {
-    // Count existing characters
     let counts = { 1: 0, 2: 0 } as Record<1 | 2, number>;
     const saved = localStorage.getItem("gameGrid");
     if (saved) {
@@ -271,7 +317,6 @@ const GamePhase = () => {
   const logEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
 
-  // Reset state when turn changes (React Router reuses the component)
   const prevTurnRef = useRef(currentTurn);
   useEffect(() => {
     if (prevTurnRef.current !== currentTurn) {
@@ -284,22 +329,28 @@ const GamePhase = () => {
       setCurrentActing(null);
       setPopup(null);
       setPopupHex(null);
-      // Reload grid/gold from localStorage
+      
       const savedGrid = localStorage.getItem("gameGrid");
       if (savedGrid) {
         const parsed: HexCell[][] = JSON.parse(savedGrid);
         if (parsed.length === ROWS && parsed[0]?.length === COLS) {
           let sc = { 1: 0, 2: 0 } as Record<number, number>;
-          for (const row of parsed) for (const cell of row) {
-            const ch = cell.character;
-            if (ch) {
-              ch.owner = cell.owner as 1 | 2;
-              ch.maxHp = ch.maxHp || ch.hp;
-              ch.spawnOrder = ch.spawnOrder ?? sc[ch.owner!]++;
-              ch.strategy = ch.strategy || "attack nearest";
-            }
+          
+          const resynced = parsed.map((row, r) => row.map((cell, c) => ({
+            ...cell,
+            isValid: BOARD_LAYOUT[r][c] === 1
+          })));
+
+          for (const row of resynced) for (const cell of row) {
+             if(cell.isValid && cell.character) {
+               const ch = cell.character;
+               ch.owner = cell.owner as 1 | 2;
+               ch.maxHp = ch.maxHp || ch.hp;
+               ch.spawnOrder = ch.spawnOrder ?? sc[ch.owner!]++;
+               ch.strategy = ch.strategy || "attack nearest";
+             }
           }
-          setGrid(parsed);
+          setGrid(resynced);
           setSpawnCounter(sc as Record<1 | 2, number>);
         }
       }
@@ -308,16 +359,14 @@ const GamePhase = () => {
     }
   }, [currentTurn]);
 
-  // ─── Derived ───
-  const ownedCount = useCallback((p: 1 | 2) => grid.flat().filter(c => c.owner === p).length, [grid]);
-  const charOnBoard = useCallback((p: 1 | 2) => grid.flat().filter(c => c.owner === p && c.character !== null).length, [grid]);
+  const ownedCount = useCallback((p: 1 | 2) => grid.flat().filter(c => c.isValid && c.owner === p).length, [grid]);
+  const charOnBoard = useCallback((p: 1 | 2) => grid.flat().filter(c => c.isValid && c.owner === p && c.character !== null).length, [grid]);
   const maxUnits = useCallback((p: 1 | 2) => ownedCount(p), [ownedCount]);
 
   const isAdjacentToOwned = (r: number, c: number, player: 1 | 2): boolean => {
-    return getHexNeighbors(r, c).some(([nr, nc]) => grid[nr]?.[nc]?.owner === player);
+    return getHexNeighbors(r, c, grid).some(([nr, nc]) => grid[nr]?.[nc]?.owner === player);
   };
 
-  // ─── Enabled characters from setup ───
   const enabledChars: Character[] = (() => {
     try {
       const saved = localStorage.getItem("enabledCharacters");
@@ -329,10 +378,11 @@ const GamePhase = () => {
     return CHARACTERS;
   })();
 
-  // ─── Shopping handlers ───
   const handleHexClick = (r: number, c: number) => {
     if (step.type !== "shopping") return;
     const cell = grid[r][c];
+    if (!cell.isValid) return;
+    
     const player = step.player;
     if (cell.owner === null) {
       if (!isAdjacentToOwned(r, c, player)) return;
@@ -383,25 +433,20 @@ const GamePhase = () => {
     setPopupHex(null);
   };
 
-  // ─── Done button: advance state machine ───
   const handleDone = () => {
     setPopup(null);
     setPopupHex(null);
-
     if (step.type !== "shopping") return;
 
     if (currentTurn === 1) {
-      // Turn 1: P1 → P2 → execute all
       if (step.player === 1) {
         setHexBoughtThisTurn(prev => ({ ...prev, 2: false }));
         setStep({ type: "shopping", player: 2 });
       } else {
-        // Both done, start execution
         saveState();
         startExecution("all");
       }
     } else {
-      // Turn 2+: shop → execute that player's units → then other player shops
       saveState();
       startExecution(step.player);
     }
@@ -419,10 +464,9 @@ const GamePhase = () => {
     setCurrentActing(null);
   };
 
-  // ─── Execution logic ───
   const checkWin = useCallback((g: HexCell[][]) => {
-    const p1Alive = g.flat().some(c => c.character && c.character.owner === 1 && c.character.hp > 0);
-    const p2Alive = g.flat().some(c => c.character && c.character.owner === 2 && c.character.hp > 0);
+    const p1Alive = g.flat().some(c => c.isValid && c.character && c.character.owner === 1 && c.character.hp > 0);
+    const p2Alive = g.flat().some(c => c.isValid && c.character && c.character.owner === 2 && c.character.hp > 0);
     if (!p1Alive && !p2Alive) { setStep({ type: "game_over" }); setWinner(null); return true; }
     if (!p1Alive) { setStep({ type: "game_over" }); setWinner(2); return true; }
     if (!p2Alive) { setStep({ type: "game_over" }); setWinner(1); return true; }
@@ -444,7 +488,6 @@ const GamePhase = () => {
       }
 
       const entry = order[execStepIndex];
-      // Find current position
       let pos: { r: number; c: number } | null = null;
       for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS; c++) {
@@ -474,33 +517,25 @@ const GamePhase = () => {
     });
   }, [step, execStepIndex, checkWin, currentTurn, execComplete]);
 
-  // Auto-run execution
   useEffect(() => {
     if (!isRunning || step.type !== "executing") return;
     const timer = setTimeout(executeStep, 600);
     return () => clearTimeout(timer);
   }, [isRunning, step, executeStep, execStepIndex]);
 
-  // Handle execution complete → transition to next step
   const handleExecDone = useCallback(() => {
     setExecComplete(false);
     setCurrentActing(null);
-
     if (currentTurn === 1) {
-      // Turn 1 exec all done → go to turn 2
       goToNextTurn();
     } else {
-      // Turn 2+
       if (step.type === "executing") {
         if (step.player === 1) {
-          // P1 exec done → P2 shops
           setHexBoughtThisTurn(prev => ({ ...prev, 2: false }));
           setStep({ type: "shopping", player: 2 });
         } else if (step.player === 2) {
-          // P2 exec done → next turn
           goToNextTurn();
         } else {
-          // "all" — shouldn't happen for turn 2+
           goToNextTurn();
         }
       }
@@ -510,14 +545,12 @@ const GamePhase = () => {
   const goToNextTurn = () => {
     const nextTurn = currentTurn + 1;
     if (nextTurn > maxTurns) {
-      // Determine winner by HP
       const p1Hp = grid.flat().filter(c => c.character?.owner === 1).reduce((s, c) => s + (c.character?.hp || 0), 0);
       const p2Hp = grid.flat().filter(c => c.character?.owner === 2).reduce((s, c) => s + (c.character?.hp || 0), 0);
       setWinner(p1Hp > p2Hp ? 1 : p2Hp > p1Hp ? 2 : null);
       setStep({ type: "game_over" });
       return;
     }
-    // Interest
     const interest1 = Math.floor(gold[1] * 0.1);
     const interest2 = Math.floor(gold[2] * 0.1);
     const newGold = {
@@ -527,30 +560,41 @@ const GamePhase = () => {
     setGold(newGold);
     localStorage.setItem("gameGold", JSON.stringify(newGold));
     localStorage.setItem("gameGrid", JSON.stringify(grid));
-
-    // Navigate to next turn (reload state)
     navigate(`/game?mode=${mode}&turn=${nextTurn}`);
   };
 
-  // ─── Pointy-top hex rendering ───
-  const hexSize = 36;
-  const hexW = Math.sqrt(3) * hexSize; // pointy-top width
-  const hexH = 2 * hexSize; // pointy-top height
-  const svgW = hexW * COLS + hexW / 2 + 8;
-  const svgH = hexH * 0.75 * (ROWS - 1) + hexH + 8;
+  // ─── Rendering (FLAT TOPPED) ───
+  const hexSize = 29;
+  const hexW = 2 * hexSize;
+  const hexH = Math.sqrt(3) * hexSize;
+  
+  // Adjusted SVG sizing for Flat-topped Even-Q
+  const svgW = hexSize * 1.5 * (COLS - 1) + 2 * hexSize + 20;
+  const svgH = hexH * (ROWS + 0.5) + 20;
 
   const hexPoints = (cx: number, cy: number) => {
+    // Flat-topped: 0, 60, 120...
     const pts: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 180) * (60 * i - 30); // pointy-top: starts at -30°
+      const angle = (Math.PI / 180) * (60 * i);
       pts.push(`${cx + hexSize * Math.cos(angle)},${cy + hexSize * Math.sin(angle)}`);
     }
     return pts.join(" ");
   };
 
   const hexCenter = (r: number, c: number) => {
-    const x = 4 + hexW / 2 + c * hexW + (r % 2 === 1 ? hexW / 2 : 0);
-    const y = 4 + hexSize + r * hexH * 0.75;
+    // Flat-topped Even-Q Layout
+    // Even cols are Shifted DOWN (offset 0.5)
+    // Odd cols are HIGH (offset 0)
+    
+    // X spacing = 1.5 * size
+    const x = 30 + hexSize * 1.5 * c;
+    
+    // Y spacing = sqrt(3) * size * row
+    // Offset Y by 0.5 * h if col is EVEN
+    const yOffset = (c % 2 === 0) ? hexH * 0.5 : 0;
+    const y = 30 + (hexH * r) + yOffset;
+    
     return { x, y };
   };
 
@@ -560,26 +604,20 @@ const GamePhase = () => {
     return "fill-muted/50 stroke-border";
   };
 
-  // Alive characters for status panel
   const aliveChars = grid.flat()
-    .filter(c => c.character && c.character.hp > 0)
+    .filter(c => c.isValid && c.character && c.character.hp > 0)
     .map(c => c.character!)
-    .sort((a, b) => {
-      if (a.owner !== b.owner) return (a.owner || 0) - (b.owner || 0);
-      return (a.spawnOrder || 0) - (b.spawnOrder || 0);
-    });
+    .sort((a, b) => (a.owner || 0) - (b.owner || 0));
 
   const isShopping = step.type === "shopping";
   const isExecuting = step.type === "executing";
   const isGameOver = step.type === "game_over";
   const activePlayer = step.type !== "game_over" ? step.player : null;
   const playerColor = activePlayer === 1 ? "text-game-blue" : activePlayer === 2 ? "text-game-orange" : "text-primary";
-
   const phaseLabel = isShopping ? "SHOPPING" : isExecuting ? "EXECUTING" : "GAME OVER";
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Top HUD */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card shrink-0">
         <div className="flex items-center gap-4">
           {activePlayer && (
@@ -610,10 +648,8 @@ const GamePhase = () => {
         </div>
       </div>
 
-      {/* Main area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Board */}
-        <div className="flex-1 flex flex-col items-center justify-center relative">
+        <div className="flex-1 flex flex-col items-center justify-center relative bg-background/50">
           {isGameOver && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
@@ -633,70 +669,70 @@ const GamePhase = () => {
             </motion.div>
           )}
 
-          <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full max-w-[820px]">
-            {grid.map((row, r) =>
-              row.map((cell, c) => {
-                const { x, y } = hexCenter(r, c);
-                const isClickable = isShopping && (
-                  (cell.owner === null && isAdjacentToOwned(r, c, step.player)) ||
-                  (cell.owner === step.player && cell.character === null)
-                );
-                const isActing = isExecuting && currentActing && cell.character &&
-                  cell.character.name === currentActing.name && cell.character.owner === currentActing.owner;
+          <div className="w-full h-full overflow-auto flex items-center justify-center">
+            <svg viewBox={`0 0 ${svgW} ${svgH}`} className="max-w-[95%] max-h-[95%] drop-shadow-2xl">
+              {grid.map((row, r) =>
+                row.map((cell, c) => {
+                  if (!cell.isValid) return null;
+                  
+                  const { x, y } = hexCenter(r, c);
+                  const isClickable = isShopping && (
+                    (cell.owner === null && isAdjacentToOwned(r, c, step.player)) ||
+                    (cell.owner === step.player && cell.character === null)
+                  );
+                  const isActing = isExecuting && currentActing && cell.character &&
+                    cell.character.name === currentActing.name && cell.character.owner === currentActing.owner;
 
-                return (
-                  <g key={`${r}-${c}`} onClick={() => handleHexClick(r, c)} className={isClickable ? "cursor-pointer" : ""}>
-                    <polygon
-                      points={hexPoints(x, y)}
-                      className={`${getCellColor(cell)} transition-colors ${isClickable ? "hover:brightness-125" : ""}`}
-                      strokeWidth={1}
-                    />
-                    {cell.character && cell.character.hp > 0 && (
-                      <>
-                        {isActing && (
-                          <circle cx={x} cy={y} r={hexSize * 0.7} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} opacity={0.6}>
-                            <animate attributeName="r" from={String(hexSize * 0.5)} to={String(hexSize * 0.8)} dur="0.6s" repeatCount="indefinite" />
-                            <animate attributeName="opacity" from="0.8" to="0" dur="0.6s" repeatCount="indefinite" />
-                          </circle>
-                        )}
-                        <text x={x} y={y - 3} textAnchor="middle" dominantBaseline="central" className="pointer-events-none select-none" fontSize="13">
-                          {cell.character.emoji}
-                        </text>
-                        <rect x={x - 10} y={y + 8} width={20} height={3} rx={1} fill="hsl(var(--muted))" />
-                        <rect
-                          x={x - 10} y={y + 8}
-                          width={Math.max(0, (cell.character.hp / cell.character.maxHp) * 20)}
-                          height={3} rx={1}
-                          fill={cell.character.hp / cell.character.maxHp > 0.5 ? "hsl(145, 72%, 45%)" : cell.character.hp / cell.character.maxHp > 0.25 ? "hsl(45, 90%, 50%)" : "hsl(0, 72%, 50%)"}
-                        />
-                      </>
-                    )}
-                    {isShopping && cell.character && cell.character.hp <= 0 === false && !cell.character && cell.owner === step.player && (
-                      <text x={x} y={y} textAnchor="middle" dominantBaseline="central" className="pointer-events-none select-none fill-muted-foreground" fontSize="10" opacity={0.4}>+</text>
-                    )}
-                  </g>
-                );
-              })
-            )}
-          </svg>
+                  return (
+                    <g key={`${r}-${c}`} onClick={() => handleHexClick(r, c)} className={isClickable ? "cursor-pointer" : ""}>
+                      <polygon
+                        points={hexPoints(x, y)}
+                        className={`${getCellColor(cell)} transition-colors duration-200 ${isClickable ? "hover:brightness-125" : ""}`}
+                        strokeWidth={1.5}
+                      />
+                      {cell.character && cell.character.hp > 0 && (
+                        <>
+                          {isActing && (
+                            <circle cx={x} cy={y} r={hexSize * 0.7} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} opacity={0.6}>
+                              <animate attributeName="r" from={String(hexSize * 0.5)} to={String(hexSize * 0.8)} dur="0.6s" repeatCount="indefinite" />
+                              <animate attributeName="opacity" from="0.8" to="0" dur="0.6s" repeatCount="indefinite" />
+                            </circle>
+                          )}
+                          <text x={x} y={y - 3} textAnchor="middle" dominantBaseline="central" className="pointer-events-none select-none" fontSize="13">
+                            {cell.character.emoji}
+                          </text>
+                          <rect x={x - 10} y={y + 8} width={20} height={3} rx={1} fill="hsl(var(--muted))" />
+                          <rect
+                            x={x - 10} y={y + 8}
+                            width={Math.max(0, (cell.character.hp / cell.character.maxHp) * 20)}
+                            height={3} rx={1}
+                            fill={cell.character.hp / cell.character.maxHp > 0.5 ? "hsl(145, 72%, 45%)" : cell.character.hp / cell.character.maxHp > 0.25 ? "hsl(45, 90%, 50%)" : "hsl(0, 72%, 50%)"}
+                          />
+                        </>
+                      )}
+                      {isShopping && !cell.character && cell.owner === step.player && (
+                        <text x={x} y={y} textAnchor="middle" dominantBaseline="central" className="pointer-events-none select-none fill-muted-foreground" fontSize="10" opacity={0.4}>+</text>
+                      )}
+                    </g>
+                  );
+                })
+              )}
+            </svg>
+          </div>
         </div>
 
-        {/* Right panel */}
         <div className="w-64 shrink-0 border-l border-border bg-card flex flex-col overflow-hidden">
-          {/* Info section (shopping) */}
           {isShopping && (
             <div className="p-3 border-b border-border">
               <p className="font-display text-[10px] tracking-wider text-muted-foreground mb-1">INFORMATION</p>
               <div className="font-body text-xs space-y-0.5 text-muted-foreground">
                 <p>🔷 Hex cost: {HEX_COST}g</p>
                 <p>📦 Hex buy: {hexBoughtThisTurn[step.player] ? "0" : "1"} left this turn</p>
-                <p>👥 Click empty hex → buy territory</p>
-                <p>🎯 Click your hex → place unit</p>
+                <p>👥 Expand territory to deploy</p>
               </div>
             </div>
           )}
 
-          {/* Unit Status */}
           <div className="p-3 border-b border-border">
             <p className="font-display text-[10px] tracking-wider text-muted-foreground mb-2">UNIT STATUS</p>
             <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
@@ -726,7 +762,6 @@ const GamePhase = () => {
             </div>
           </div>
 
-          {/* Action Log */}
           <div className="flex-1 p-3 overflow-hidden flex flex-col">
             <p className="font-display text-[10px] tracking-wider text-muted-foreground mb-2">ACTION LOG</p>
             <div className="flex-1 overflow-y-auto bg-secondary rounded-lg p-2 space-y-1">
@@ -739,12 +774,10 @@ const GamePhase = () => {
                   <span className="text-muted-foreground ml-1">{log.action}</span>
                 </div>
               ))}
-              {logs.length === 0 && <p className="font-body text-[11px] text-muted-foreground">No actions yet</p>}
               <div ref={logEndRef} />
             </div>
           </div>
 
-          {/* Bottom buttons */}
           <div className="p-3 border-t border-border">
             {isShopping && (
               <motion.button
@@ -763,7 +796,7 @@ const GamePhase = () => {
               <div className="flex gap-2">
                 <motion.button whileTap={{ scale: 0.95 }} onClick={() => setIsRunning(r => !r)}
                   className="flex-1 px-3 py-2 rounded-lg bg-primary text-primary-foreground font-display text-xs font-bold tracking-wider">
-                  {isRunning ? "⏸ PAUSE" : "▶ RUN"}
+                  {isRunning ? "⏸" : "▶"}
                 </motion.button>
                 <motion.button whileTap={{ scale: 0.95 }} onClick={executeStep} disabled={isRunning}
                   className="px-3 py-2 rounded-lg bg-secondary text-secondary-foreground font-display text-xs font-bold tracking-wider disabled:opacity-30 border border-border">
@@ -786,14 +819,13 @@ const GamePhase = () => {
             {isGameOver && (
               <motion.button whileTap={{ scale: 0.95 }} onClick={() => navigate("/")}
                 className="w-full px-4 py-3 rounded-lg bg-primary text-primary-foreground font-display text-sm font-bold tracking-wider glow-primary">
-                BACK TO MENU
+                MENU
               </motion.button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Shopping Popups */}
       <AnimatePresence>
         {popup === "buyHex" && popupHex && isShopping && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -802,18 +834,13 @@ const GamePhase = () => {
               onClick={e => e.stopPropagation()} className="bg-card border border-border rounded-xl p-6 w-80">
               <h3 className="font-display text-sm tracking-wider text-foreground mb-1">BUY TERRITORY</h3>
               <p className="font-body text-xs text-muted-foreground mb-4">
-                Hex ({popupHex.r}, {popupHex.c}) — Cost: {HEX_COST}g
+                ({popupHex.r}, {popupHex.c}) — Cost: {HEX_COST}g
               </p>
-              {hexBoughtThisTurn[step.player] ? (
-                <p className="font-body text-sm text-destructive mb-4">Already bought a hex this turn!</p>
-              ) : gold[step.player] < HEX_COST ? (
-                <p className="font-body text-sm text-destructive mb-4">Not enough gold!</p>
-              ) : null}
               <div className="flex gap-2">
                 <motion.button whileTap={{ scale: 0.95 }} onClick={buyHex}
                   disabled={hexBoughtThisTurn[step.player] || gold[step.player] < HEX_COST}
                   className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-display text-xs font-bold tracking-wider disabled:opacity-30">
-                  BUY ({HEX_COST}g)
+                  BUY
                 </motion.button>
                 <motion.button whileTap={{ scale: 0.95 }} onClick={() => setPopup(null)}
                   className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground font-display text-xs tracking-wider border border-border">
@@ -829,13 +856,10 @@ const GamePhase = () => {
             className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setPopup(null)}>
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
               onClick={e => e.stopPropagation()} className="bg-card border border-border rounded-xl p-6 w-96">
-              <h3 className="font-display text-sm tracking-wider text-foreground mb-1">PLACE CHARACTER</h3>
+              <h3 className="font-display text-sm tracking-wider text-foreground mb-1">DEPLOY UNIT</h3>
               <p className="font-body text-xs text-muted-foreground mb-4">
-                Hex ({popupHex.r}, {popupHex.c}) — Units: {charOnBoard(step.player)}/{maxUnits(step.player)}
+                Limits: {charOnBoard(step.player)}/{maxUnits(step.player)} units
               </p>
-              {charOnBoard(step.player) >= maxUnits(step.player) && (
-                <p className="font-body text-sm text-destructive mb-3">Unit limit reached!</p>
-              )}
               <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
                 {enabledChars.map(char => {
                   const canAfford = gold[step.player] >= char.cost;
@@ -847,7 +871,7 @@ const GamePhase = () => {
                       <span className="text-2xl">{char.emoji}</span>
                       <div className="flex-1">
                         <p className="font-display text-xs tracking-wider">{char.name}</p>
-                        <p className="font-body text-[10px] text-muted-foreground">HP:{char.hp} ATK:{char.atk} DEF:{char.def}</p>
+                        <p className="font-body text-[10px] text-muted-foreground">HP:{char.hp} ATK:{char.atk}</p>
                       </div>
                       <span className="font-display text-sm font-bold text-primary">{char.cost}g</span>
                     </motion.button>
